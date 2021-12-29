@@ -4,6 +4,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"context"
 
 	"berty.tech/go-orbit-db/address"
 	"berty.tech/go-orbit-db/cache"
@@ -17,44 +18,46 @@ import (
 var InMemoryDirectory = ":memory:"
 
 type levelDownCache struct {
+	ctx context.Context
 	muCaches sync.Mutex
 	caches   map[string]*wrappedCache
 	logger   *zap.Logger
 }
 
 type wrappedCache struct {
+	ctx context.Context
 	wrappedCache datastore.Datastore
 	manager      *levelDownCache
 	id           string
 	closed       bool
 }
 
-func (w *wrappedCache) Get(key datastore.Key) (value []byte, err error) {
-	return w.wrappedCache.Get(key)
+func (w *wrappedCache) Get(ctx context.Context, key datastore.Key) (value []byte, err error) {
+	return w.wrappedCache.Get(w.ctx, key)
 }
 
-func (w *wrappedCache) Has(key datastore.Key) (exists bool, err error) {
-	return w.wrappedCache.Has(key)
+func (w *wrappedCache) Has(ctx context.Context, key datastore.Key) (exists bool, err error) {
+	return w.wrappedCache.Has(w.ctx,key)
 }
 
-func (w *wrappedCache) GetSize(key datastore.Key) (size int, err error) {
-	return w.wrappedCache.GetSize(key)
+func (w *wrappedCache) GetSize(ctx context.Context, key datastore.Key) (size int, err error) {
+	return w.wrappedCache.GetSize(w.ctx,key)
 }
 
-func (w *wrappedCache) Query(q query.Query) (query.Results, error) {
-	return w.wrappedCache.Query(q)
+func (w *wrappedCache) Query(ctx context.Context, q query.Query) (query.Results, error) {
+	return w.wrappedCache.Query(w.ctx,q)
 }
 
-func (w *wrappedCache) Put(key datastore.Key, value []byte) error {
-	return w.wrappedCache.Put(key, value)
+func (w *wrappedCache) Put(ctx context.Context, key datastore.Key, value []byte) error {
+	return w.wrappedCache.Put(w.ctx, key, value)
 }
 
-func (w *wrappedCache) Delete(key datastore.Key) error {
-	return w.wrappedCache.Delete(key)
+func (w *wrappedCache) Delete(	ctx context.Context, key datastore.Key) error {
+	return w.wrappedCache.Delete(w.ctx, key)
 }
 
-func (w *wrappedCache) Sync(key datastore.Key) error {
-	return w.wrappedCache.Sync(key)
+func (w *wrappedCache) Sync(ctx context.Context, key datastore.Key) error {
+	return w.wrappedCache.Sync(w.ctx, key)
 }
 
 func (w *wrappedCache) Close() error {
@@ -80,9 +83,18 @@ func (l *levelDownCache) Load(directory string, dbAddress address.Address) (ds d
 	defer l.muCaches.Unlock()
 
 	var ok bool
-	if ds, ok = l.caches[keyPath]; ok {
+	var wc * wrappedCache
+	
+	if wc, ok = l.caches[keyPath]; ok {
+		ds= wc.wrappedCache
 		return
 	}
+	
+	//ds = wc.wrappedCache
+	
+//	if ds, ok = l.caches[keyPath]; ok {
+//		return
+//	}
 
 	l.logger.Debug("opening cache db", zap.String("path", keyPath))
 
@@ -97,7 +109,7 @@ func (l *levelDownCache) Load(directory string, dbAddress address.Address) (ds d
 		return
 	}
 
-	l.caches[keyPath] = &wrappedCache{wrappedCache: ds, id: keyPath, manager: l}
+	l.caches[keyPath] = &wrappedCache{ctx:l.ctx, wrappedCache: ds, id: keyPath, manager: l}
 	return
 }
 
@@ -135,7 +147,7 @@ func (l *levelDownCache) Destroy(directory string, dbAddress address.Address) er
 }
 
 // New Creates a new leveldb data store
-func New(opts *cache.Options) cache.Interface {
+func New(ctx context.Context, opts *cache.Options) cache.Interface {
 	if opts == nil {
 		opts = &cache.Options{}
 	}
@@ -146,6 +158,7 @@ func New(opts *cache.Options) cache.Interface {
 	}
 
 	return &levelDownCache{
+		ctx: ctx,
 		caches: map[string]*wrappedCache{},
 		logger: logger,
 	}
